@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct remind_gamesApp: App {
+    init(){
+        
+    }
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTab()
         }
     }
 }
