@@ -6,111 +6,137 @@
 //
 
 import SwiftUI
+import CoreData
 import UserNotifications
 
 struct AddView: View {
-    @EnvironmentObject var store: ReminderStore
+    @Environment(\.managedObjectContext) private var viewContext
+    @Binding var isPresented: Bool
     @Binding var selection: Int
+    @Binding var calendarDate: Date
     
-    @State var title: String = ""
-    @State var date: Date = Date()         // ← 今日の日付／時刻が初期値
-    @State var noNotif = false
-
-    // 今年の1/1 ～ 12/31 を動的に作る
-    let dateRange: ClosedRange<Date> = {
+    @State private var title: String = ""
+    @State private var date: Date = Date()
+    @State private var isNoNotification: Bool = false
+    
+    // 今年の1月1日～12月31日までを動的に範囲指定
+    private let dateRange: ClosedRange<Date> = {
         let calendar = Calendar.current
         let year = calendar.component(.year, from: Date())
-        let startComp = DateComponents(year: year, month: 1, day: 1)
-        let endComp   = DateComponents(year: year, month: 12, day: 31,
-                                       hour: 23, minute: 59, second: 59)
-        let start = calendar.date(from: startComp)!
-        let end   = calendar.date(from: endComp)!
+        let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1))!
+        let end = calendar.date(from: DateComponents(year: year, month: 12, day: 31,
+                                                     hour: 23, minute: 59, second: 59))!
         return start...end
     }()
-
+    
     var body: some View {
-        
         VStack {
-            Text("予定を追加する")
+            Text("新規タスク")
                 .font(.system(size: 30, weight: .bold))
-
+            
             Spacer().frame(height: 50)
-
-            TextField("タイトルを入力してください", text: $title)
+            
+            TextField("タイトルを入力", text: $title)
                 .padding(.horizontal, 30)
                 .textFieldStyle(.roundedBorder)
-
+            
             DatePicker(
-                "通知時間",
+                "日時を選択",
                 selection: $date,
-                in: dateRange,                  // ← 今年の範囲
+                in: dateRange,
                 displayedComponents: [.date, .hourAndMinute]
             )
             .padding(.horizontal, 30)
             .padding(.vertical)
-            .disabled(noNotif)
-            .opacity(noNotif ? 0.6 : 1)
-
-            Toggle("通知をしない", isOn: $noNotif)
+            .disabled(isNoNotification)
+            .opacity(isNoNotification ? 0.6 : 1)
+            
+            Toggle("通知しない", isOn: $isNoNotification)
                 .padding(.horizontal, 30)
-
+            
+            Spacer().frame(height: 50)
+            
             Button {
-                let newItem = Reminder(
-                    title: title,
-                    date: date,
-                    isNoNotification: noNotif
-                )
-                store.reminders.append(newItem)
-
-                // 通知する設定ならスケジュール
-                if !noNotif {
-                    scheduleNotification(for: newItem)
-                }
-
-                // 入力リセット
-                title = ""
-                date = Date()
-                noNotif = false
-
-                // タブを戻す
-                selection = 0
-
+                let addedDate = date
+                
+                addReminder()
+                calendarDate = addedDate
+                selection = 2
+                isPresented = false
             } label: {
                 Image(systemName: "plus.circle.dashed")
                     .font(.system(size: 100, weight: .light))
+                    .foregroundColor(.accentColor)
             }
+            .disabled(title.isEmpty)
             
+            Spacer()
         }
     }
     
-    func scheduleNotification(for reminder: Reminder) {
+    /// 新しいリマインダーをCoreDataに保存し、通知をスケジュール
+    private func addReminder() {
+        let newItem = ReminderEntity(context: viewContext)
+        newItem.id = UUID()
+        newItem.title = title
+        newItem.date = date
+        newItem.isChecked = false
+        newItem.isNoNotification = isNoNotification
+        saveContext()
+        
+        if !isNoNotification {
+            scheduleNotification(id: newItem.id!, title: title, date: date)
+        }
+        
+        resetFields()
+    }
+    
+    /// フィールドを初期状態にリセット
+    private func resetFields() {
+        title = ""
+        date = Date()
+        isNoNotification = false
+    }
+    
+    /// CoreData の保存処理
+    private func saveContext() {
+        do {
+            try viewContext.save()
+        } catch {
+            print("Save failed: \(error)")
+            viewContext.rollback()
+        }
+    }
+    
+    /// UNUserNotificationCenter に通知リクエストを追加
+    private func scheduleNotification(id: UUID, title: String, date: Date) {
         let content = UNMutableNotificationContent()
-        content.title = reminder.title
+        content.title = title
         content.body = "リマインダーの時間です！"
         content.sound = .default
-
-        // 通知日時をセット
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: reminder.date)
-
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
-
+        
+        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        let request = UNNotificationRequest(identifier: id.uuidString,
+                                            content: content,
+                                            trigger: trigger)
+        
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("通知エラー: \(error.localizedDescription)")
+                print("Notification error: \(error.localizedDescription)")
             } else {
-                print("通知をスケジュールしました: \(components)")
+                print("通知をスケジュールしました: \(comps)")
             }
         }
     }
-
 }
 
-#Preview {
-    AddView(selection: .constant(1))
-        .environmentObject(
-                    ReminderStore()
-        )
+struct AddView_Previews: PreviewProvider {
+    static var previews: some View {
+        let context = PersistenceController.shared.container.viewContext
+        return AddView(isPresented: .constant(true),
+                       selection: .constant(1),
+                       calendarDate: .constant(Date()))
+            .environment(\.managedObjectContext, context)
+    }
 }

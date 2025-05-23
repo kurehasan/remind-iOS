@@ -1,27 +1,43 @@
+// ContentView.swift
+
 import SwiftUI
+import CoreData
 
 struct ContentView: View {
-    @EnvironmentObject private var store: ReminderStore
-    
-    private var todayTasks: [Reminder] {
-        store.reminders(on: Date())
-            .filter{ !$0.isNoNotification }
+    // Core Data のコンテキストを取得
+    @Environment(\.managedObjectContext) private var viewContext
+
+    // 全タスクを日付順でフェッチ
+    @FetchRequest(
+        entity: ReminderEntity.entity(),
+        sortDescriptors: [
+            NSSortDescriptor(keyPath: \ReminderEntity.date, ascending: true)
+        ]
+    ) private var reminders: FetchedResults<ReminderEntity>
+
+    // 今日のタスク（通知あり）
+    private var todayTasks: [ReminderEntity] {
+        reminders.filter {
+            guard let d = $0.date else { return false }
+            return Calendar.current.isDateInToday(d) && !$0.isNoNotification
+        }
     }
-    private var noNotifyTasks: [Reminder] {
-        store.reminders.filter { $0.isNoNotification }
+
+    // 通知なしタスク
+    private var noNotifyTasks: [ReminderEntity] {
+        reminders.filter { $0.isNoNotification }
     }
-    
+
     var body: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
-                
-                // ─ 上半分: 今日のタスク ─────────────────────────────
+                // ── 上半分：今日のタスク ──
                 List {
-                    Section(header: Text("今日のタスク")
-                        .foregroundColor(.primary)
-                        .font(.system(size: 20, weight: .bold))
+                    Section(header:
+                        Text("今日のタスク")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.primary)
                     ) {
-                        // 空ならメッセージ、そうでなければ一覧
                         if todayTasks.isEmpty {
                             Text("タスクはありません")
                                 .foregroundColor(.secondary)
@@ -29,7 +45,7 @@ struct ContentView: View {
                                 .padding(.vertical, 20)
                                 .listRowSeparator(.hidden)
                         } else {
-                            ForEach(todayTasks, id: \.id) { item in
+                            ForEach(todayTasks, id: \.objectID) { item in
                                 rowView(for: item)
                             }
                             .onDelete(perform: deleteToday)
@@ -37,16 +53,16 @@ struct ContentView: View {
                     }
                 }
                 .listStyle(.plain)
-                // 上半分に固定
                 .frame(height: geo.size.height * 0.5)
-                
-                Divider()  // 画面中央の区切り
-                
-                // ─ 下半分: 通知をしないタスク ────────────────────────
+
+                Divider()
+
+                // ── 下半分：通知をしないタスク ──
                 List {
-                    Section(header: Text("通知をしないタスク")
-                        .foregroundColor(.primary)
-                        .font(.system(size: 20, weight: .bold))
+                    Section(header:
+                        Text("通知をしないタスク")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.primary)
                     ) {
                         if noNotifyTasks.isEmpty {
                             Text("該当タスクはありません")
@@ -55,7 +71,7 @@ struct ContentView: View {
                                 .padding(.vertical, 20)
                                 .listRowSeparator(.hidden)
                         } else {
-                            ForEach(noNotifyTasks, id: \.id) { item in
+                            ForEach(noNotifyTasks, id: \.objectID) { item in
                                 rowView(for: item)
                             }
                             .onDelete(perform: deleteNoNotify)
@@ -67,48 +83,52 @@ struct ContentView: View {
             }
         }
     }
-    
-    // MARK: 共通の行ビュー
+
+    // MARK: — 共通の行ビュー
     @ViewBuilder
-    private func rowView(for item: Reminder) -> some View {
+    private func rowView(for item: ReminderEntity) -> some View {
         HStack {
             Image(systemName: item.isChecked ? "checkmark.square" : "square")
-                .onTapGesture {
-                    toggleChecked(item)
-                }
-            Text(item.title)
+                .onTapGesture { toggleChecked(item) }
+            Text(item.title ?? "")
+                .lineLimit(1)
             Spacer()
             if item.isNoNotification {
                 Text("―").foregroundColor(.gray)
-            } else {
-                Text(item.date, style: .time)
+            } else if let d = item.date {
+                Text(d, style: .time)
             }
         }
         .padding(.vertical, 6)
     }
-    
-    // MARK: 操作メソッド
-    private func toggleChecked(_ item: Reminder) {
-        guard let idx = store.reminders.firstIndex(where: { $0.id == item.id }) else { return }
-        store.reminders[idx].isChecked.toggle()
+
+    // MARK: — 操作メソッド
+    private func toggleChecked(_ item: ReminderEntity) {
+        item.isChecked.toggle()
+        saveContext()
     }
+
     private func deleteToday(at offsets: IndexSet) {
-        delete(offsets, from: todayTasks)
+        offsets.map { todayTasks[$0] }.forEach(viewContext.delete)
+        saveContext()
     }
+
     private func deleteNoNotify(at offsets: IndexSet) {
-        delete(offsets, from: noNotifyTasks)
+        offsets.map { noNotifyTasks[$0] }.forEach(viewContext.delete)
+        saveContext()
     }
-    private func delete(_ offsets: IndexSet, from list: [Reminder]) {
-        for off in offsets {
-            let del = list[off]
-            if let idx = store.reminders.firstIndex(where: { $0.id == del.id }) {
-                store.reminders.remove(at: idx)
-            }
+
+    private func saveContext() {
+        do {
+            try viewContext.save()
+        } catch {
+            print("Save error:", error)
+            viewContext.rollback()
         }
     }
 }
 
 #Preview {
     ContentView()
-        .environmentObject(ReminderStore())
+        .environment(\.managedObjectContext, PersistenceController().container.viewContext)
 }

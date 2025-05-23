@@ -6,30 +6,28 @@
 //
 
 import SwiftUI
+import CoreData
 
 struct MainTab: View {
-    @StateObject private var store = ReminderStore()
-    @State private var selection: Int = 0
+    @State private var tabSelection: Int = 0
+    @State private var calenderSelectedDate: Date = Date()
 
     var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: $tabSelection) {
             ContentView()
-                .environmentObject(store)
                 .tag(0)
                 .tabItem {
                     Label("Home",systemImage: "house")
                 }
 
-            AddView(selection: $selection)
-                .environmentObject(store)
+            AddView(isPresented: .constant(true), selection: $tabSelection, calendarDate: $calenderSelectedDate)
                 .tag(1)
                 .tabItem {
                     Label("", systemImage: "plus.app.fill")
                         .font(.system(size: 200, weight: .medium))
                 }
 
-            CalendarView()
-                .environmentObject(store)
+            CalendarView(selectedDate: $calenderSelectedDate)
                 .tag(2)
                 .tabItem {
                     Label("Calendar", systemImage: "calendar")
@@ -41,6 +39,7 @@ struct MainTab: View {
 struct MainTab_Previews: PreviewProvider {
     static var previews: some View {
         MainTab()
+            .environment(\.managedObjectContext,PersistenceController().container.viewContext)
     }
 }
 

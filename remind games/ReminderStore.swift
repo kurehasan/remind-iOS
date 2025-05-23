@@ -7,15 +7,40 @@
 
 import Combine
 import Foundation
+import CoreData
 
-class ReminderStore: ObservableObject {
-    @Published var reminders: [Reminder] = []
-    @Published var selectDate: Date = Date()
+final class ReminderStore: ObservableObject {
+    @Published var context: NSManagedObjectContext
 
-    func reminders(on date: Date) -> [Reminder] {
-        reminders.filter{
-            Calendar.current.isDate($0.date, inSameDayAs: date)
-        }
+    init(context: NSManagedObjectContext = PersistenceController.shared.container.viewContext) {
+        self.context = context
+    }
+
+    func fetchAll() -> [ReminderEntity] {
+        let request: NSFetchRequest<ReminderEntity> = ReminderEntity.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \ReminderEntity.date, ascending: true)]
+        do { return try context.fetch(request) }
+        catch { print("Fetch error: \(error)"); return [] }
+    }
+
+    func add(_ reminder: ReminderEntity) {
+        context.insert(reminder)
+        save()
+    }
+
+    func delete(_ entity: ReminderEntity) {
+        context.delete(entity)
+        save()
+    }
+
+    func toggleChecked(_ entity: ReminderEntity) {
+        entity.isChecked.toggle()
+        save()
+    }
+
+    private func save() {
+        do { try context.save() }
+        catch { print("Save error: \(error)"); context.rollback() }
     }
 }
 

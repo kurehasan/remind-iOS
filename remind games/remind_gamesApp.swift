@@ -9,12 +9,14 @@ import SwiftUI
 
 @main
 struct remind_gamesApp: App {
+    let persistenceController = PersistenceController()
     init(){
         
     }
     var body: some Scene {
         WindowGroup {
             MainTab()
+                .environment(\.managedObjectContext, persistenceController.container.viewContext)
         }
     }
 }
